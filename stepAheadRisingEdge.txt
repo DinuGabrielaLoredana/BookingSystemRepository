@@ -2,6 +2,7 @@
 #include <utility/Adafruit_MCP23017.h>
 #include <SPI.h>
 #include <RFID.h>
+#include <TimeLib.h>
 
 #define TEMPERATURE_CONVERSION_RATE 500/1024 //500mv for 1024 
 #define TEMPERATURE_SAMPLE_RATE 1000
@@ -17,8 +18,8 @@ RFID nfc(SDAPIN, RESETPIN);
 
 
 unsigned int bookingTime; //time in seconds
-
-
+bool roomEmpty; // false - occupied , true -  free
+time_t timeOnSelect;
 
 void setup() {
   pinMode(sensorTemperature, INPUT);
@@ -29,6 +30,8 @@ void setup() {
 
   lcd.setBacklight(BACKLIGHT);
   bookingTime = 0;
+  roomEmpty = true;
+
 
 
 
@@ -43,7 +46,10 @@ void loop() {
 
 
   //writeToDisplay(readTemperature());
-  readCard();
+  printRoomState();
+ if (roomEmpty) {
+   readCard();
+ }
   delay(1000);
 
 
@@ -100,18 +106,20 @@ void setTime() {
       if (buttons & BUTTON_UP) {
         delay(300);
         bookingTime = bookingTime + 15 * 60; //add 15 minutes
-        
+
       }
       if (buttons & BUTTON_DOWN) {
         if (bookingTime != 0) {
           delay(300);
           bookingTime = bookingTime - 15 * 60; //subtract 15 minutes
-         
+
         }
       }
       if (buttons & BUTTON_SELECT) {
         delay(300);
         flagSelect = 0;
+        roomEmpty = false;
+        timeOnSelect = now();
 
       }
       lcd.clear();
@@ -124,9 +132,26 @@ void setTime() {
 
 
 
-void roomState() {
-
-
+void printRoomState() {
+  if (roomEmpty) {
+    lcd.clear();
+    lcd.setCursor(5, 0);
+    lcd.print("Free");
+  } else {
+    lcd.clear();
+    lcd.setCursor(3, 0);
+    lcd.print("Occupied");
+    lcd.setCursor(5, 1);
+    lcd.print(String(bookingTime / 60) + ":" + String(bookingTime % 60));
+    time_t currentTime = now();
+    if (bookingTime > 0 ) {
+      bookingTime = bookingTime - (currentTime - timeOnSelect);
+      timeOnSelect = currentTime;
+    } else {
+      roomEmpty = true;
+      bookingTime = 0;
+    }
+  }
 }
 
 
