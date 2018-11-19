@@ -14,12 +14,12 @@
 #define RESETPIN 8 // RFID Module RESET pin
 #define TEAMID 377177  //team id
 const int sensorTemperature = A0; // analog pin used to measure Temperature
-const int sensorIRHorizontal = A1; // analog pin used for the IR sensor count the people that passes the door
-const int sensorIRAngle = A2; // analog pin used for the IR sensor to measure the direction of the person
+const int sensorIRFirst = A1; // analog pin used for the IR sensor 
+const int sensorIRSecond = A2; // analog pin used for the IR sensor 
 /*In this implementation one of the sensors is put on the ground at 45 degrees and the other one is put on the wall*/
 
-int distanceHorizontal; //OX inistial setup distance
-int distanceAngle;  //angle inistial setup distance
+int distanceIRFirst; //OX inistial setup distance
+int distanceIRSecond;  //angle inistial setup distance
 int numberOfPeople; // number of people in the meeting room ( that crossed the door)
 int maxIncrement;
 
@@ -56,8 +56,8 @@ void setup() {
   lcd.setBacklight(BACKLIGHT);
   bookingTime = 0;
   roomEmpty = true;
-  distanceHorizontal = readDistanceSensor(sensorIRHorizontal);
-  distanceAngle = readDistanceSensor(sensorIRAngle);
+  distanceIRFirst = readDistanceSensor(sensorIRFirst);
+  distanceIRSecond = readDistanceSensor(sensorIRSecond);
   numberOfPeople = 0;
   maxIncrement = 0;
   serialNumber = "";
@@ -85,19 +85,23 @@ void loop() {
     sendData(serialNumber, String(numberOfPeople));
 
     int measure = 0;
-    int enteredOX = 0;
-    int enteredOZ = 0;
-    float initAngledDistance = readDistanceSensor(sensorIRAngle);
+    int crossedIRFirst = 0;
+    int crossedIRSecond = 0;
+    //in this configuration both sensors are on the wall , if you cross the first sensor and then the second one you leave the room otherwise you are entering it
     while ( measure < 10) {
       delay(50);
       measure++;
-      if (readDistanceSensor(sensorIRHorizontal) != distanceHorizontal) {
-        enteredOX = 1;
+      if (readDistanceSensor(sensorIRFirst) != distanceIRFirst) {
+        crossedIRFirst = crossedIRFirst + crossedIRSecond + 1;
+      }
+       if (readDistanceSensor(sensorIRSecond) != crossedIRSecond) {
+        crossedIRSecond = crossedIRFirst + crossedIRSecond + 1;
       }
     }
-    float finalAngledDistance = readDistanceSensor(sensorIRAngle);
-    if (enteredOX == 1) {
-      if (finalAngledDistance >= initAngledDistance) {
+
+    if (crossedIRFirst != 0 &&  crossedIRSecond != 0) {
+
+      if (crossedIRFirst > crossedIRSecond) {
         if (numberOfPeople > 0) {
           numberOfPeople --;
         }
