@@ -5,21 +5,31 @@
 #include <Ethernet.h>
 #include <TimeLib.h>
 
-#define TEMPERATURE_CONVERSION_RATE 500/1024 //500mv for 1024 
+#define VOLTAGE_CONVERSION_RATE 500/1024 //500mv for 1024 
 #define TEMPERATURE_SAMPLE_RATE 1000
 
 #define BACKLIGHT 0x7
 
 #define SDAPIN 9 // RFID Module SDA pin
 #define RESETPIN 8 // RFID Module RESET pin
-#define TEAMID 377177
+#define TEAMID 377177  //team id
 const int sensorTemperature = A0; // analog pin used to measure Temperature
+const int sensorIRHorizontal = A1; // analog pin used for the IR sensor count the people that passes the door
+const int sensorIRAngle = A2; // analog pin used for the IR sensor to measure the direction of the person
+int distanceHorizontal; //OX inistial setup distance
+int distanceAngle;  //angle inistial setup distance
+int numberOfPeople; // number of people in the meeting room ( that crossed the door)
+int maxIncrement;
+
+String serialNumber; // serial number of the card
+
+
 Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 RFID nfc(SDAPIN, RESETPIN);
 
-time_t timeOnSelect;
-
-
+time_t timeOnSelect; // time when the room was occupied
+time_t timeOnDrop; // time since when the room was emptied
+time_t lastSend;
 EthernetClient client;
 IPAddress ip(192, 168, 0, 52);
 IPAddress myDns(192, 168, 0, 1);
@@ -35,7 +45,7 @@ bool roomEmpty; // false - occupied , true -  free
 
 
 void setup() {
-  pinMode(sensorTemperature, INPUT);
+  //pinMode(sensorTemperature, INPUT);
   Serial.begin(9600);
   lcd.begin(16, 2);
   SPI.begin();
@@ -44,8 +54,12 @@ void setup() {
   lcd.setBacklight(BACKLIGHT);
   bookingTime = 0;
   roomEmpty = true;
-
-
+  distanceHorizontal = readDistanceSensor(sensorIRHorizontal);
+  distanceAngle = readDistanceSensor(sensorIRAngle);
+  numberOfPeople = 0;
+  maxIncrement = 0;
+  serialNumber = "";
+  lastSend = now() - 10 ;
   Ethernet.begin(mac, ip, myDns, gateway, subnet);
   // Check connection to web service
   bool result = TestConnection();
@@ -55,30 +69,60 @@ void setup() {
     Serial.println("Connection with Web Service is down");
   }
 
-
-
-
 }
 
 void loop() {
-  //Serial.print(readTemperature());
-  //Serial.print("C");
-  //Serial.println("");
-  //Serial.println(String(readTemperature()));
-  
 
-  //writeToDisplay(readTemperature());
-   if (roomEmpty) {
-     
-     AddData(String(TEAMID), "NA" ,"NA", String(readTemperature()));
-    
-   }
 
-  
+
+  if (roomEmpty) {
+
+    sendData("NA", "NA");
+
+  } else {
+    sendData(serialNumber, String(numberOfPeople));
+
+    int measure = 0;
+    int enteredOX = 0;
+    int enteredOZ = 0;
+    float initAngledDistance = readDistanceSensor(sensorIRAngle);
+    while ( measure < 10) {
+      delay(50);
+      measure++;
+      if (readDistanceSensor(sensorIRHorizontal) != distanceHorizontal) {
+        enteredOX = 1;
+      }
+    }
+    float finalAngledDistance = readDistanceSensor(sensorIRAngle);
+    if (enteredOX == 1) {
+      if (finalAngledDistance >= initAngledDistance) {
+        if (numberOfPeople > 0) {
+          numberOfPeople --;
+        }
+
+      } else {
+        numberOfPeople ++;
+      }
+    }
+    if (numberOfPeople == 0) {
+      time_t currentTime = now();
+      if ( currentTime - timeOnDrop >= 300) {
+        roomEmpty = true;
+      }
+    } else {
+      timeOnDrop = now();
+    }
+    extendTime();
+
+  }
+
+
   printRoomState();
   if (roomEmpty) {
     readCard();
   }
+
+
   delay(1000);
 
 
@@ -88,22 +132,34 @@ void loop() {
 
 
 }
+void sendData(String serialNumber, String numberOfPeople) {
+  if (now() - lastSend > 10) {
+    int tCelsius = int(readTemperature());
+    AddData(String(TEAMID), serialNumber , numberOfPeople, String(tCelsius));
+    lastSend = now();
+  }
+}
 
 
 float readTemperature() {
   //delay(TEMPERATURE_SAMPLE_RATE);
   float tCelsius, voltage;
   voltage = analogRead(sensorTemperature);
-  tCelsius = voltage * TEMPERATURE_CONVERSION_RATE;
+  tCelsius = voltage * VOLTAGE_CONVERSION_RATE;
   return tCelsius;
 }
-//
-//void writeToDisplay(float value) {
-//  lcd.clear();
-//  lcd.setCursor(0, 0);
-//
-//  lcd.print(value);
-//}
+
+float readDistanceSensor(int sensorPin) {
+  float  voltage, distance;
+  voltage = analogRead(sensorPin) * 0.0048828125;
+  distance = 13 * pow(voltage, -1);
+  if (distance > 30) {
+    distance = 30;
+  }
+  Serial.println(distance);
+  return distance;
+}
+
 
 void readCard() {
   if (nfc.isCard())
@@ -111,15 +167,12 @@ void readCard() {
     /* If so then get its serial number */
     nfc.readCardSerial();
     Serial.println("Card detected:");
-    String serialNumber = "";
+    serialNumber = "";
     for (int i = 0; i < 5; i++)
     {
       serialNumber = serialNumber + nfc.serNum[i];
     }
-    Serial.println();
-    Serial.println(CheckCardId(serialNumber));
     Serial.println(serialNumber);
-    Serial.println();
     Serial.println();
     if (CheckCardId(serialNumber)) {
       setTime();
@@ -130,16 +183,16 @@ void readCard() {
 
 
 void setTime() {
-  byte flagSelect = 1;
+
   lcd.clear();
   lcd.setCursor(5, 1);
   lcd.print(String(bookingTime / 60) + ":" + String(bookingTime % 60) + "0");
-  while (flagSelect) {
+  while (roomEmpty) {
     uint8_t buttons = lcd.readButtons();
     if (buttons) {
       if (buttons & BUTTON_UP) {
         delay(300);
-        bookingTime = bookingTime + 15 * 60 ; //add 15 minutes
+        bookingTime = bookingTime + 15 * 60; //add 15 minutes
 
       }
       if (buttons & BUTTON_DOWN) {
@@ -151,10 +204,10 @@ void setTime() {
       }
       if (buttons & BUTTON_SELECT) {
         delay(300);
-        flagSelect = 0;
         roomEmpty = false;
         timeOnSelect = now();
-
+        timeOnDrop = now();
+        sendData(serialNumber, String(numberOfPeople));
       }
       lcd.clear();
       lcd.setCursor(5, 1);
@@ -180,6 +233,9 @@ void printRoomState() {
     time_t currentTime = now();
     if (bookingTime > 0 ) {
       bookingTime = bookingTime - (currentTime - timeOnSelect);
+      if (bookingTime < 0 ) {
+        bookingTime = 0;
+      }
       timeOnSelect = currentTime;
     } else {
       roomEmpty = true;
@@ -188,6 +244,28 @@ void printRoomState() {
   }
 }
 
+
+void extendTime() {
+
+  uint8_t buttons = lcd.readButtons();
+
+  if (buttons && maxIncrement <= 4) {
+    if (buttons & BUTTON_UP && maxIncrement < 4) {
+      delay(300);
+      bookingTime = bookingTime + 15 * 60; //add 15 minutes
+      maxIncrement ++;
+
+    }
+    if (buttons & BUTTON_DOWN && maxIncrement > 0) {
+      if (bookingTime > 0) {
+        delay(300);
+        bookingTime = bookingTime - 15 * 60; //subtract 15 minutes
+        maxIncrement --;
+      }
+    }
+  }
+
+}
 
 
 
@@ -232,7 +310,7 @@ boolean CheckCardId(String CardID) {
     client.println();
     client.println(value);
     client.println();
-    delay(1500);
+    delay(1000);
 
     while (client.available())
     {
@@ -267,7 +345,7 @@ void AddData(String teamId, String userId, String numberOfParticipants, String t
     client.println(content);
     client.println();
 
-    delay(1500);
+    delay(1000);
 
     while (client.available())
     {
