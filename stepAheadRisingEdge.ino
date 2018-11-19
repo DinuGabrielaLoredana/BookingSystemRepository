@@ -16,6 +16,8 @@
 const int sensorTemperature = A0; // analog pin used to measure Temperature
 const int sensorIRHorizontal = A1; // analog pin used for the IR sensor count the people that passes the door
 const int sensorIRAngle = A2; // analog pin used for the IR sensor to measure the direction of the person
+/*In this implementation one of the sensors is put on the ground at 45 degrees and the other one is put on the wall*/
+
 int distanceHorizontal; //OX inistial setup distance
 int distanceAngle;  //angle inistial setup distance
 int numberOfPeople; // number of people in the meeting room ( that crossed the door)
